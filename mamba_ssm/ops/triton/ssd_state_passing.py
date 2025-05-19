@@ -194,6 +194,10 @@ def _state_passing_bwd_kernel(
 def _state_passing_fwd(states, dA_chunk_cumsum, initial_states=None, seq_idx=None, chunk_size=None,
                        out_dtype=None):
     batch, nchunks, nheads, dim = states.shape
+    if torch.is_tensor(nchunks):
+        nchunks = nchunks.item()
+        nheads = nheads.item()
+        dim = dim.item()
     assert dA_chunk_cumsum.shape == (batch, nheads, nchunks)
     if initial_states is not None:
         assert initial_states.shape == (batch, nheads, dim)
@@ -250,8 +254,12 @@ def _state_passing_bwd(
         assert dfinal_states.shape == (batch, nheads, dim)
     BLOCK_SIZE_min = 64
     n_blocks = (dim + BLOCK_SIZE_min - 1) // BLOCK_SIZE_min
-    ddA_chunk_cumsum = torch.empty(batch, nheads, nchunks, n_blocks,
+    if torch.compiler.is_compiling():
+        ddA_chunk_cumsum = torch.zeros(batch, nheads, nchunks, n_blocks,
                                     dtype=torch.float32, device=dA_chunk_cumsum.device)
+    else:
+        ddA_chunk_cumsum = torch.empty(batch, nheads, nchunks, n_blocks,
+                                       dtype=torch.float32, device=dA_chunk_cumsum.device)
     grid = lambda META: (triton.cdiv(dim, META['BLOCK_SIZE']), batch, nheads)
     with torch.cuda.device(dout.device.index):
         _state_passing_bwd_kernel[grid](
@@ -273,9 +281,12 @@ def _state_passing_bwd(
             HAS_DINITSTATES=dinitstates is not None,
             HAS_SEQ_IDX=seq_idx is not None,
         )
-    BLOCK_SIZE_actual = _state_passing_bwd_kernel.best_config.kwargs["BLOCK_SIZE"]
-    n_valid_blocks = (dim + BLOCK_SIZE_actual - 1) // BLOCK_SIZE_actual
-    ddA_chunk_cumsum = ddA_chunk_cumsum[..., :n_valid_blocks].sum(dim=-1).to(dtype=dA_chunk_cumsum.dtype)
+    if torch.compiler.is_compiling():
+        ddA_chunk_cumsum = ddA_chunk_cumsum.sum(dim=-1).to(dtype=dA_chunk_cumsum.dtype)
+    else:
+        BLOCK_SIZE_actual = _state_passing_bwd_kernel.best_config.kwargs["BLOCK_SIZE"]
+        n_valid_blocks = (dim + BLOCK_SIZE_actual - 1) // BLOCK_SIZE_actual
+        ddA_chunk_cumsum = ddA_chunk_cumsum[..., :n_valid_blocks].sum(dim=-1).to(dtype=dA_chunk_cumsum.dtype)
     if states_dtype is not None and states_dtype == states.dtype:
         states_converted = states
     return (dstates, ddA_chunk_cumsum, dinitstates) if states_dtype is None else (dstates, ddA_chunk_cumsum, dinitstates, states_converted)
