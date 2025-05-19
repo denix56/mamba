@@ -17,6 +17,7 @@ import triton
 import triton.language as tl
 
 from einops import rearrange, repeat
+from einops._torch_specific import allow_ops_in_compiled_graph
 
 try:
     from causal_conv1d import causal_conv1d_fn

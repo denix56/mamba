@@ -13,7 +13,7 @@ import triton.language as tl
 from einops import rearrange, repeat
 
 from mamba_ssm.ops.triton.softplus import softplus
-
+from einops._torch_specific import allow_ops_in_compiled_graph
 
 @triton.autotune(
     configs=[

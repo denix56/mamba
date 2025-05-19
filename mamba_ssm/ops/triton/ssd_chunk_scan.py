@@ -13,6 +13,7 @@ import triton
 import triton.language as tl
 
 from einops import rearrange, repeat
+from einops._torch_specific import allow_ops_in_compiled_graph
 
 from mamba_ssm.ops.triton.ssd_bmm import _bmm_chunk_fwd, _bmm_chunk_bwd
 
