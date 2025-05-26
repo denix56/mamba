@@ -153,7 +153,7 @@ def _chunk_scan_chunk_state_bwd_dx_kernel(
             b = tl.load(b_ptrs, mask=(offs_m[:, None] < chunk_size_limit) & (offs_dstate[None, :] < dstate - k), other=0.0)
             dstates = tl.load(dstates_ptrs, mask=(offs_dstate[:, None] < dstate - k) & (offs_n[None, :] < hdim), other=0.0)
             dstates = dstates.to(b_ptr.dtype.element_ty)
-            tl.dot(b, dstates, acc=acc)
+            acc = tl.dot(b, dstates, acc=acc)
             b_ptrs += BLOCK_SIZE_K * stride_b_dstate
             dstates_ptrs += BLOCK_SIZE_K * stride_dstates_dstate
         acc *= scale[:, None]
@@ -190,7 +190,7 @@ def _chunk_scan_chunk_state_bwd_dx_kernel(
         mask = (k + offs_k[None, :] >= offs_m[:, None]) & (k + offs_k[None, :] < K_MAX)
         cb = tl.where(mask, cb, 0.0)
         cb = cb.to(dout_ptr.dtype.element_ty)
-        tl.dot(cb, dout, acc=acc)
+        acc = tl.dot(cb, dout, acc=acc)
         cb_ptrs += BLOCK_SIZE_K * stride_cb_csize_k
         dout_ptrs += BLOCK_SIZE_K * stride_dout_seqlen
         dA_cumsum_ptrs += BLOCK_SIZE_K * stride_dA_cs_csize
