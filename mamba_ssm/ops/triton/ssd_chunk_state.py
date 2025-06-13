@@ -235,7 +235,7 @@ def _chunk_state_fwd_kernel(
             scale = tl.where(seq_idx_k == seq_idx_last, tl.exp(tl.minimum((dA_cs_last - dA_cs_k), 0.0)) * dt_k, 0.0)
         b *= scale[:, None]
         b = b.to(x_ptr.dtype.element_ty)
-        acc = tl.dot(x, b, acc=acc)
+        acc += tl.dot(x, b)
         x_ptrs += BLOCK_SIZE_K * stride_x_seqlen
         b_ptrs += BLOCK_SIZE_K * stride_b_seqlen
         dt_ptrs += BLOCK_SIZE_K * stride_dt_csize
@@ -322,7 +322,7 @@ def _chunk_state_bwd_dx_kernel(
             b = tl.load(b_ptrs, mask=(offs_m[:, None] < chunk_size_limit) & (offs_k[None, :] < dstate - k), other=0.0)
             dstates = tl.load(dstates_ptrs, mask=(offs_k[:, None] < dstate - k) & (offs_n[None, :] < hdim), other=0.0)
             dstates = dstates.to(b_ptr.dtype.element_ty)
-            acc = tl.dot(b, dstates, acc=acc)
+            acc += tl.dot(b, dstates)
             b_ptrs += BLOCK_SIZE_K * stride_b_dstate
             dstates_ptrs += BLOCK_SIZE_K * stride_states_dstate
 
@@ -546,7 +546,7 @@ def _chunk_state_bwd_ddAcs_stable_kernel(
             b = tl.load(b_ptrs, mask=(offs_m[:, None] < chunk_size_limit) & (offs_k[None, :] < dstate - k), other=0.0)
             dstates = tl.load(dstates_ptrs, mask=(offs_k[:, None] < dstate - k) & (offs_n[None, :] < hdim), other=0.0)
             dstates = dstates.to(b_ptr.dtype.element_ty)
-            acc = tl.dot(b, dstates, acc=acc)
+            acc += tl.dot(b, dstates)
             b_ptrs += BLOCK_SIZE_K * stride_b_dstate
             dstates_ptrs += BLOCK_SIZE_K * stride_states_dstate
 
@@ -649,7 +649,7 @@ def _chunk_state_varlen_kernel(
                          tl.exp(tl.minimum((dA_cs_last - dA_cs_k), 0.0)) * dt_k, 0.0)
         b *= scale[:, None]
         b = b.to(x_ptr.dtype.element_ty)
-        acc = tl.dot(x, b, acc=acc)
+        acc += tl.dot(x, b)
         x_ptrs += BLOCK_SIZE_K * stride_x_seqlen
         b_ptrs += BLOCK_SIZE_K * stride_b_seqlen
         dt_ptrs += BLOCK_SIZE_K * stride_dt_csize

@@ -73,7 +73,7 @@ def _bmm_chunk_fwd_kernel(
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         a = tl.load(a_ptrs, mask=(offs_m[:, None] < chunk_size_limit) & (offs_k[None, :] < K - k * BLOCK_SIZE_K), other=0.0).to(dot_dtype)
         b = tl.load(b_ptrs, mask=(offs_k[:, None] < K - k * BLOCK_SIZE_K) & (offs_n[None, :] < chunk_size_limit), other=0.0).to(dot_dtype)
-        acc = tl.dot(a, b, acc=acc)
+        acc += tl.dot(a, b)
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
 
@@ -142,7 +142,7 @@ def _bmm_chunk_bwd_kernel(
     for cs in range(0, tl.cdiv(chunk_size_limit, BLOCK_SIZE_CS)):
         dout = tl.load(dout_ptrs, mask=(offs_m[:, None] < chunk_size) & (offs_cs[None, :] < chunk_size_limit - cs * BLOCK_SIZE_CS), other=0.0).to(dot_dtype)
         a = tl.load(a_ptrs, mask=(offs_cs[:, None] < chunk_size_limit - cs * BLOCK_SIZE_CS) & (offs_n[None, :] < K), other=0.0).to(dot_dtype)
-        acc = tl.dot(dout, a, acc=acc)
+        acc += tl.dot(dout, a)
         dout_ptrs += BLOCK_SIZE_CS * stride_dout_csize_m
         a_ptrs += BLOCK_SIZE_CS * stride_a_seqlen
 
