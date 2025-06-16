@@ -262,7 +262,7 @@ def _chunk_scan_chunk_state_bwd_dx(x, dt, dA_cumsum, B, CB, dout, dstates, D=Non
         dx = torch.empty_like(x)
     else:
         assert dx.shape == x.shape
-    ddt = torch.empty(batch, nheads, nchunks, chunk_size, device=dout.device, dtype=torch.float32)
+    ddt = torch.zeros(batch, nheads, nchunks, chunk_size, device=dout.device, dtype=torch.float32)
     grid_dx = lambda META: (triton.cdiv(chunk_size, META['BLOCK_SIZE_M']) * triton.cdiv(headdim, META['BLOCK_SIZE_N']),
                         batch * nchunks, nheads)
     with torch.cuda.device(x.device.index):

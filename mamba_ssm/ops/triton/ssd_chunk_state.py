@@ -77,7 +77,7 @@ def _chunk_cumsum_fwd_kernel(
     tl.store(dA_cs_ptrs, dA_cs, mask=(offs_h[:, None] < nheads) & (offs_c[None, :] < chunk_size))
 
 
-@triton.heuristics({'BLOCK_SIZE_CHUNK': lambda args: triton.next_power_of_2(args['chunk_size'])})
+#@triton.heuristics({'BLOCK_SIZE_CHUNK': lambda args: triton.next_power_of_2(args['chunk_size'])})
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE_H': 1}),
@@ -89,7 +89,7 @@ def _chunk_cumsum_fwd_kernel(
         triton.Config({'BLOCK_SIZE_H': 64}),
     ],
     key=['chunk_size', 'nheads'],
-    reset_to_zero=["dA_ptr", "ddt_bias_ptr"],
+   reset_to_zero=["dA_ptr", "ddt_bias_ptr"],
 )
 @triton.jit
 def _chunk_cumsum_bwd_kernel(
@@ -702,23 +702,23 @@ def _chunk_cumsum_fwd(dt, A, chunk_size, dt_bias=None, dt_softplus=False, dt_lim
 def _chunk_cumsum_bwd(ddA, ddt_out, dt, A, dt_bias=None, dt_softplus=False, dt_limit=(0.0, float("inf")), ddt=None):
     batch, seqlen, nheads = dt.shape
     _, _, nchunks, chunk_size = ddA.shape
-    if torch.is_tensor(chunk_size):
-        nchunks = nchunks.item()
-        chunk_size = chunk_size.item()
+    # if torch.is_tensor(chunk_size):
+    #     nchunks = nchunks.item()
+    #     chunk_size = chunk_size.item()
     assert ddA.shape == (batch, nheads, nchunks, chunk_size)
     assert ddt_out.shape == (batch, nheads, nchunks, chunk_size)
     assert A.shape == (nheads,)
     HAS_DT_BIAS = dt_bias is not None
     if HAS_DT_BIAS:
         assert dt_bias.shape == (nheads,)
-        ddt_bias = torch.empty_like(dt_bias, dtype=torch.float32)
+        ddt_bias = torch.zeros_like(dt_bias, dtype=torch.float32)
     else:
         ddt_bias = torch.empty((), device=dt.device, dtype=torch.float32)
     if ddt is not None:
         assert ddt.shape == dt.shape
     else:
         ddt = torch.empty_like(dt)
-    dA = torch.empty_like(A, dtype=torch.float32)
+    dA = torch.zeros_like(A, dtype=torch.float32)
     grid_chunk_cs = lambda META: (batch, nchunks, triton.cdiv(nheads, META['BLOCK_SIZE_H']))
     with torch.cuda.device(dt.device.index):
         _chunk_cumsum_bwd_kernel[grid_chunk_cs](
@@ -734,6 +734,7 @@ def _chunk_cumsum_bwd(ddA, ddt_out, dt, A, dt_bias=None, dt_softplus=False, dt_l
             dA.stride(0),
             ddt_bias.stride(0) if HAS_DT_BIAS else 0,
             dt_softplus,
+            BLOCK_SIZE_CHUNK=triton.next_power_of_2(chunk_size),
             HAS_DT_BIAS=HAS_DT_BIAS,
         )
     return ddt, dA, ddt_bias if HAS_DT_BIAS else None
@@ -742,9 +743,9 @@ def _chunk_cumsum_bwd(ddA, ddt_out, dt, A, dt_bias=None, dt_softplus=False, dt_l
 def _chunk_state_fwd(B, x, dt, dA_cumsum, seq_idx=None, states=None, states_in_fp32=True):
     batch, seqlen, nheads, headdim = x.shape
     _, _, nchunks, chunk_size = dt.shape
-    if torch.is_tensor(chunk_size):
-        nchunks = nchunks.item()
-        chunk_size = chunk_size.item()
+    # if torch.is_tensor(chunk_size):
+    #     nchunks = nchunks.item()
+    #     chunk_size = chunk_size.item()
     _, _, ngroups, dstate = B.shape
     assert nheads % ngroups == 0
     assert B.shape == (batch, seqlen, ngroups, dstate)
@@ -778,9 +779,9 @@ def _chunk_state_fwd(B, x, dt, dA_cumsum, seq_idx=None, states=None, states_in_f
 def _chunk_state_bwd_dx(B, x, dt, dA_cumsum, dstates, dx=None):
     batch, seqlen, nheads, headdim = x.shape
     _, _, nchunks, chunk_size = dt.shape
-    if torch.is_tensor(chunk_size):
-        nchunks = nchunks.item()
-        chunk_size = chunk_size.item()
+    # if torch.is_tensor(chunk_size):
+    #     nchunks = nchunks.item()
+    #     chunk_size = chunk_size.item()
     _, _, ngroups, dstate = B.shape
     assert nheads % ngroups == 0
     assert B.shape == (batch, seqlen, ngroups, dstate)
@@ -791,8 +792,8 @@ def _chunk_state_bwd_dx(B, x, dt, dA_cumsum, dstates, dx=None):
         assert dx.shape == x.shape
     else:
         dx = torch.empty_like(x)
-    ddt = torch.empty(batch, nheads, nchunks, chunk_size, device=dt.device, dtype=torch.float32)
-    ddA_cumsum = torch.empty(batch, nheads, nchunks, chunk_size, device=dA_cumsum.device, dtype=torch.float32)
+    ddt = torch.zeros(batch, nheads, nchunks, chunk_size, device=dt.device, dtype=torch.float32)
+    ddA_cumsum = torch.zeros(batch, nheads, nchunks, chunk_size, device=dA_cumsum.device, dtype=torch.float32)
     grid_dx = lambda META: (triton.cdiv(chunk_size, META['BLOCK_SIZE_M']) * triton.cdiv(headdim, META['BLOCK_SIZE_N']),
                        batch * nchunks, nheads)
     with torch.cuda.device(x.device.index):
@@ -826,7 +827,7 @@ def _chunk_state_bwd_db(x, dt, dA_cumsum, dstates, seq_idx=None, B=None, ngroups
         assert B.shape == (batch, seqlen, ngroups, dstate)
         B_strides = (B.stride(0), B.stride(1), B.stride(2), B.stride(3))
         # Use torch.empty since the Triton kernel will call init_to_zero
-        ddA_cumsum = torch.empty(batch, nheads, nchunks, chunk_size, device=x.device, dtype=torch.float32)
+        ddA_cumsum = torch.zeros(batch, nheads, nchunks, chunk_size, device=x.device, dtype=torch.float32)
         ddA_cumsum_strides = (ddA_cumsum.stride(0), ddA_cumsum.stride(2), ddA_cumsum.stride(1), ddA_cumsum.stride(3))
     else:
         B_strides = (0, 0, 0, 0)
@@ -878,7 +879,7 @@ def _chunk_state_bwd_ddAcs_stable(B, x, dt, dA_cumsum, dstates, seq_idx=None):
     if seq_idx is not None:
         assert seq_idx.shape == (batch, seqlen)
     # Use torch.empty since the Triton kernel will call init_to_zero
-    ddA_cumsum = torch.empty(batch, nheads, nchunks, chunk_size, device=x.device, dtype=torch.float32)
+    ddA_cumsum = torch.zeros(batch, nheads, nchunks, chunk_size, device=x.device, dtype=torch.float32)
     grid_ddtcs = lambda META: (triton.cdiv(chunk_size, META['BLOCK_SIZE_M']) * triton.cdiv(headdim, META['BLOCK_SIZE_N']),
                           batch * nchunks, nheads)
     with torch.cuda.device(x.device.index):
